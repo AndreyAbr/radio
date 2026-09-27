@@ -4,9 +4,11 @@
 
 ## Требования
 
-* .NET SDK 10.0 или новее
+* .NET SDK 10.0 или новее (или Docker)
 
 ## Запуск проекта
+
+### Вариант 1. Запуск через .NET CLI
 
 1. Перейдите в каталог проекта:
    ```bash
@@ -18,16 +20,28 @@
    dotnet run --urls "http://localhost:5000"
    ```
 
-3. Откройте интерфейс в браузере:
-   * Веб-плеер: [http://localhost:5000](http://localhost:5000)
-   * Панель администратора: [http://localhost:5000/admin](http://localhost:5000/admin)
+### Вариант 2. Запуск в Docker
 
-## Основные адреса
+```bash
+docker compose up -d --build
+```
+
+Сервер будет доступен по адресу `http://localhost:5000`.
+
+## Веб-интерфейсы
+
+* Веб-плеер: [http://localhost:5000](http://localhost:5000)
+* Панель администратора: [http://localhost:5000/admin](http://localhost:5000/admin)
+
+## Основные эндпоинты
 
 * `GET /` — веб-плеер слушателя.
-* `GET /admin` — панель управления (переключение станций, загрузка треков, метрики).
-* `GET /stream/{station}` — аудиопоток станции (`rock`, `jazz`, `pop`).
+* `GET /admin` — панель администратора (управление треками, лимиты, метрики).
+* `GET /stream/{station}` — аудиопоток станции (`rock`, `jazz`, `pop`, `synthwave`). Поддерживает заголовок `Icy-MetaData: 1` для передачи названий треков (Shoutcast/Icecast).
 * `GET /stations` — список доступных станций и метаданные в JSON.
+* `GET /api/admin/stations/{id}/tracks` — список треков станции.
+* `DELETE /api/admin/stations/{id}/tracks/{fileName}` — удаление трека станции.
+* `POST /api/admin/stations/{id}/max-listeners` — установка лимита слушателей (при превышении сервер возвращает HTTP 503 Service Unavailable).
 
 ## Запуск тестов
 

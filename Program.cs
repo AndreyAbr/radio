@@ -285,6 +285,74 @@ app.MapPost("/api/admin/stations/{id}/upload", async (string id, HttpContext ctx
     return Results.Ok(new { message = $"Успешно загружено треков: {uploadedCount}", trackCount = station.TrackCount });
 });
 
+// Эндпоинт управления треками: получение списка треков станции
+app.MapGet("/api/admin/stations/{id}/tracks", (string id, StationManager manager) =>
+{
+    var station = manager.GetStation(id);
+    if (station == null) return Results.NotFound(new { message = "Станция не найдена." });
+
+    return Results.Ok(new
+    {
+        stationId = station.Id,
+        stationName = station.Name,
+        currentTrack = station.GetCurrentTrackName(),
+        tracks = station.GetTracks(),
+        trackCount = station.TrackCount
+    });
+});
+
+// Эндпоинт управления треками: удаление трека с диска и из плейлиста
+app.MapDelete("/api/admin/stations/{id}/tracks/{fileName}", (string id, string fileName, StationManager manager) =>
+{
+    var station = manager.GetStation(id);
+    if (station == null) return Results.NotFound(new { message = "Станция не найдена." });
+
+    var safeName = Path.GetFileName(fileName);
+    bool deleted = station.DeleteTrack(safeName);
+    if (!deleted)
+    {
+        return Results.BadRequest(new { message = $"Не удалось удалить трек '{safeName}' (файл не найден или заблокирован)." });
+    }
+
+    manager.RecordActivity("admin", station.Name, $"Удален трек: {safeName}");
+    return Results.Ok(new
+    {
+        message = $"Трек '{safeName}' успешно удален",
+        trackCount = station.TrackCount,
+        tracks = station.GetTracks()
+    });
+});
+
+// Эндпоинт настройки ограничения максимального числа слушателей (503)
+app.MapPost("/api/admin/stations/{id}/max-listeners", async (string id, HttpContext ctx, StationManager manager) =>
+{
+    var station = manager.GetStation(id);
+    if (station == null) return Results.NotFound(new { message = "Станция не найдена." });
+
+    int? max = null;
+    if (ctx.Request.HasJsonContentType())
+    {
+        try
+        {
+            var body = await ctx.Request.ReadFromJsonAsync<MaxListenersRequest>();
+            max = body?.MaxListeners;
+        }
+        catch { }
+    }
+    else if (ctx.Request.HasFormContentType)
+    {
+        var form = await ctx.Request.ReadFormAsync();
+        if (int.TryParse(form["maxListeners"], out var val)) max = val;
+    }
+
+    station.MaxListeners = (max.HasValue && max.Value > 0) ? max.Value : null;
+    manager.RecordActivity("admin", station.Name, station.MaxListeners.HasValue 
+        ? $"Установлен лимит слушателей: {station.MaxListeners}" 
+        : "Снят лимит слушателей");
+
+    return Results.Ok(new { maxListeners = station.MaxListeners, message = "Лимит слушателей обновлен" });
+});
+
 // Эндпоинт 2: Потоковое аудиовещание радиостанции в реальном времени
 app.MapGet("/stream/{station}", async (string station, HttpContext ctx, StationManager manager, ILogger<Program> logger) =>
 {
@@ -297,7 +365,20 @@ app.MapGet("/stream/{station}", async (string station, HttpContext ctx, StationM
         return;
     }
 
-    // 2. Устанавливаем HTTP-заголовки для потоковой передачи данных (HTTP chunked streaming)
+    // 2. Проверяем лимит слушателей станции (Требование №5: код 503 при превышении лимита)
+    var (subscribed, subId, reader, initialBurst) = radioStation.TrySubscribe();
+    if (!subscribed)
+    {
+        ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        ctx.Response.Headers.RetryAfter = "10";
+        await ctx.Response.WriteAsJsonAsync(new
+        {
+            message = $"Превышен лимит слушателей для станции '{station}' (максимум: {radioStation.MaxListeners}). Попробуйте позже."
+        });
+        return;
+    }
+
+    // 3. Устанавливаем HTTP-заголовки для потоковой передачи данных (HTTP chunked streaming)
     ctx.Response.ContentType = "audio/mpeg";
     ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
     ctx.Response.Headers.Pragma = "no-cache";
@@ -306,27 +387,49 @@ app.MapGet("/stream/{station}", async (string station, HttpContext ctx, StationM
     ctx.Response.Headers["Connection"] = "keep-alive";
     ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
 
-    // 3. Подключаем слушателя напрямую к живому серверному эфиру
-    var (subId, reader, initialBurst) = radioStation.Subscribe();
+    // 4. Поддержка протокола ICY (Требование №2: Shoutcast/Icecast metadata injection)
+    bool wantsIcy = ctx.Request.Headers.TryGetValue("Icy-MetaData", out var icyHeader) && icyHeader == "1";
+    const int icyMetaInt = 16384;
+    if (wantsIcy)
+    {
+        ctx.Response.Headers["icy-metaint"] = icyMetaInt.ToString();
+        ctx.Response.Headers["icy-name"] = radioStation.Name;
+        ctx.Response.Headers["icy-genre"] = radioStation.Id;
+        ctx.Response.Headers["icy-br"] = "128";
+        ctx.Response.Headers["icy-pub"] = "1";
+    }
+
     var clientIp = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
     manager.RecordActivity(clientIp, radioStation.Name, "Подключился к эфиру");
     logger.LogInformation("Клиент [{Ip}] подключился к '{Station}'. Слушателей онлайн: {Count}", 
         clientIp, radioStation.Name, radioStation.ListenersCount);
 
+    var icyWriter = wantsIcy
+        ? new IcyMetadataWriter(ctx.Response.Body, icyMetaInt, () => radioStation.GetCurrentTrackName())
+        : null;
+
     try
     {
-        // 4. Отправляем текущий срез эфира (burst) для моментального старта воспроизведения в плеере
+        // 5. Отправляем текущий срез эфира (burst) для моментального старта воспроизведения в плеере
         if (initialBurst.Length > 0)
         {
-            await ctx.Response.Body.WriteAsync(initialBurst, ctx.RequestAborted);
+            if (icyWriter != null)
+                await icyWriter.WriteAudioAsync(initialBurst, ctx.RequestAborted);
+            else
+                await ctx.Response.Body.WriteAsync(initialBurst, ctx.RequestAborted);
+
             await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
             manager.AddStreamedBytes(initialBurst.Length);
         }
 
-        // 5. Транслируем живые порции звука по мере их воспроизведения на сервере
+        // 6. Транслируем живые порции звука по мере их воспроизведения на сервере
         await foreach (var chunk in reader.ReadAllAsync(ctx.RequestAborted))
         {
-            await ctx.Response.Body.WriteAsync(chunk, ctx.RequestAborted);
+            if (icyWriter != null)
+                await icyWriter.WriteAudioAsync(chunk, ctx.RequestAborted);
+            else
+                await ctx.Response.Body.WriteAsync(chunk, ctx.RequestAborted);
+
             await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
             manager.AddStreamedBytes(chunk.Length);
         }
@@ -357,5 +460,7 @@ app.MapGet("/stream/{station}", async (string station, HttpContext ctx, StationM
 app.Run();
 
 public record SeekRequest(double? Seconds, double? Delta);
+public record MaxListenersRequest(int? MaxListeners);
 
 public partial class Program { }
+

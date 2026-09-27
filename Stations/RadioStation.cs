@@ -54,6 +54,8 @@ public class RadioStation : IDisposable
     private static readonly byte[] CachedSilenceBurstBuffer = CreateSilenceBuffer(150);
 
     public int ListenersCount => Volatile.Read(ref _listenersCount);
+    public int? MaxListeners { get; set; } = null;
+    public bool CanAcceptListener => !MaxListeners.HasValue || ListenersCount < MaxListeners.Value;
     public int CurrentTrackIndex { get { lock (_lock) return _currentTrackIndex; } }
     public int TrackVersion { get { lock (_lock) return _trackVersion; } }
     public int TrackDurationSeconds => (int)(Interlocked.Read(ref _trackDurationMs) / 1000);
@@ -228,11 +230,30 @@ public class RadioStation : IDisposable
     }
 
     /// <summary>
-    /// Подключение клиента к живому эфиру станции.
-    /// Возвращает стартовый срез эфира (burst) и канал для получения живых пакетов в реальном времени.
+    /// Попытка подключения клиента к живому эфиру станции с учетом лимита слушателей.
     /// </summary>
-    public (Guid SubId, ChannelReader<ReadOnlyMemory<byte>> Reader, byte[] InitialBurst) Subscribe()
+    public (bool Success, Guid SubId, ChannelReader<ReadOnlyMemory<byte>> Reader, byte[] InitialBurst) TrySubscribe()
     {
+        if (MaxListeners.HasValue)
+        {
+            while (true)
+            {
+                int current = Volatile.Read(ref _listenersCount);
+                if (current >= MaxListeners.Value)
+                {
+                    return (false, Guid.Empty, null!, Array.Empty<byte>());
+                }
+                if (Interlocked.CompareExchange(ref _listenersCount, current + 1, current) == current)
+                {
+                    break;
+                }
+            }
+        }
+        else
+        {
+            Interlocked.Increment(ref _listenersCount);
+        }
+
         var subId = Guid.NewGuid();
         var channel = Channel.CreateBounded<ReadOnlyMemory<byte>>(new BoundedChannelOptions(16)
         {
@@ -240,7 +261,6 @@ public class RadioStation : IDisposable
         });
 
         _subscribers[subId] = channel;
-        Interlocked.Increment(ref _listenersCount);
 
         byte[] burst;
         lock (_burstLock)
@@ -266,7 +286,17 @@ public class RadioStation : IDisposable
             }
         }
 
-        return (subId, channel.Reader, burst);
+        return (true, subId, channel.Reader, burst);
+    }
+
+    /// <summary>
+    /// Подключение клиента к живому эфиру станции.
+    /// Возвращает стартовый срез эфира (burst) и канал для получения живых пакетов в реальном времени.
+    /// </summary>
+    public (Guid SubId, ChannelReader<ReadOnlyMemory<byte>> Reader, byte[] InitialBurst) Subscribe()
+    {
+        var (_, subId, reader, burst) = TrySubscribe();
+        return (subId, reader, burst);
     }
 
     /// <summary>
@@ -331,6 +361,38 @@ public class RadioStation : IDisposable
         lock (_lock)
         {
             return _tracks.Select(Path.GetFileName).Where(f => f != null).Cast<string>().ToList();
+        }
+    }
+
+    /// <summary>
+    /// Удаляет трек из плейлиста станции и с диска.
+    /// </summary>
+    public bool DeleteTrack(string fileName)
+    {
+        lock (_lock)
+        {
+            var safeName = Path.GetFileName(fileName);
+            var targetPath = Path.Combine(DirectoryPath, safeName);
+            if (!File.Exists(targetPath))
+                return false;
+
+            try
+            {
+                // Если удаляется текущий трек и в плейлисте несколько треков, переключаем на следующий
+                if (_tracks.Count > 1 && _currentTrackIndex >= 0 && _currentTrackIndex < _tracks.Count &&
+                    Path.GetFileName(_tracks[_currentTrackIndex]).Equals(safeName, StringComparison.OrdinalIgnoreCase))
+                {
+                    SkipTrack();
+                }
+
+                File.Delete(targetPath);
+                RefreshPlaylist();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 
@@ -438,7 +500,8 @@ public class RadioStation : IDisposable
             TrackDurationSeconds,
             TrackRemainingSeconds,
             IsPaused,
-            IsLiveDj
+            IsLiveDj,
+            MaxListeners
         );
     }
 

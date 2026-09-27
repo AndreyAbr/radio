@@ -693,4 +693,88 @@ public class StreamingApiIntegrationTests : IClassFixture<WebApplicationFactory<
 
         await allWs.CloseOutputAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "Done", wsCts.Token);
     }
+
+    [Fact]
+    public async Task Stream_With_Icy_MetaData_Header_Returns_Icy_Headers()
+    {
+        var client = _factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Get, "/stream/rock");
+        request.Headers.Add("Icy-MetaData", "1");
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+
+        response.EnsureSuccessStatusCode();
+        Assert.True(response.Headers.Contains("icy-metaint"), "Ответ должен содержать заголовок icy-metaint");
+        Assert.Equal("16384", response.Headers.GetValues("icy-metaint").First());
+        Assert.True(response.Headers.Contains("icy-name"));
+    }
+
+    [Fact]
+    public async Task Stream_Without_Icy_MetaData_Header_Does_Not_Return_Icy_Headers()
+    {
+        var client = _factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Get, "/stream/rock");
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+
+        response.EnsureSuccessStatusCode();
+        Assert.False(response.Headers.Contains("icy-metaint"), "Ответ для обычного браузера НЕ должен содержать icy-metaint");
+    }
+
+    [Fact]
+    public async Task Stream_Exceeding_Max_Listeners_Returns_503()
+    {
+        var manager = _factory.Services.GetRequiredService<StationManager>();
+        var station = manager.GetStation("rock");
+        Assert.NotNull(station);
+
+        var prevMax = station.MaxListeners;
+        station.MaxListeners = 1;
+
+        try
+        {
+            var client1 = _factory.CreateClient();
+            var client2 = _factory.CreateClient();
+
+            using var cts1 = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var resp1 = await client1.SendAsync(new HttpRequestMessage(HttpMethod.Get, "/stream/rock"), HttpCompletionOption.ResponseHeadersRead, cts1.Token);
+            resp1.EnsureSuccessStatusCode();
+
+            // Второй клиент должен получить 503 Service Unavailable
+            using var cts2 = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var resp2 = await client2.SendAsync(new HttpRequestMessage(HttpMethod.Get, "/stream/rock"), HttpCompletionOption.ResponseHeadersRead, cts2.Token);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, resp2.StatusCode);
+            Assert.True(resp2.Headers.Contains("Retry-After"));
+        }
+        finally
+        {
+            station.MaxListeners = prevMax;
+        }
+    }
+
+    [Fact]
+    public async Task Admin_Track_Management_And_MaxListeners_Endpoints_Work()
+    {
+        var client = _factory.CreateClient();
+
+        // 1. Получение треков станции
+        var tracksRes = await client.GetAsync("/api/admin/stations/rock/tracks");
+        tracksRes.EnsureSuccessStatusCode();
+        var tracksJson = await tracksRes.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(tracksJson.TryGetProperty("tracks", out var tracksProp));
+        Assert.True(tracksProp.GetArrayLength() > 0);
+
+        // 2. Установка лимита слушателей
+        var setLimitRes = await client.PostAsJsonAsync("/api/admin/stations/rock/max-listeners", new { maxListeners = 25 });
+        setLimitRes.EnsureSuccessStatusCode();
+        var limitJson = await setLimitRes.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(25, limitJson.GetProperty("maxListeners").GetInt32());
+
+        // 3. Снятие лимита
+        var clearLimitRes = await client.PostAsJsonAsync("/api/admin/stations/rock/max-listeners", new { maxListeners = (int?)null });
+        clearLimitRes.EnsureSuccessStatusCode();
+    }
 }
+

@@ -12,5 +12,6 @@ public record StationInfo(
     int TrackDurationSeconds = 0,
     int TrackRemainingSeconds = 0,
     bool IsPaused = false,
-    bool IsLiveDj = false
+    bool IsLiveDj = false,
+    int? MaxListeners = null
 );

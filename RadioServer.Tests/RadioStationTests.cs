@@ -497,4 +497,98 @@ public class RadioStationTests : IDisposable
         double actualSec = info.DurationMs / 1000.0;
         Assert.InRange(actualSec, expectedSec * 0.95, expectedSec * 1.05);
     }
+
+    [Fact]
+    public void Station_TrySubscribe_Respects_MaxListeners_Limit()
+    {
+        CreateDummyTrack("track_limit.mp3");
+        var station = new RadioStation("test_limit", "Limit Station", _tempDir);
+        station.MaxListeners = 2;
+
+        var (success1, subId1, reader1, _) = station.TrySubscribe();
+        Assert.True(success1);
+        Assert.Equal(1, station.ListenersCount);
+
+        var (success2, subId2, reader2, _) = station.TrySubscribe();
+        Assert.True(success2);
+        Assert.Equal(2, station.ListenersCount);
+
+        // 3-й слушатель должен получить отказ (лимит 2)
+        var (success3, subId3, _, _) = station.TrySubscribe();
+        Assert.False(success3);
+        Assert.Equal(Guid.Empty, subId3);
+        Assert.Equal(2, station.ListenersCount);
+
+        // После отключения одного слушателя новый должен подключиться успешно
+        station.Unsubscribe(subId1);
+        Assert.Equal(1, station.ListenersCount);
+
+        var (success4, subId4, _, _) = station.TrySubscribe();
+        Assert.True(success4);
+        Assert.Equal(2, station.ListenersCount);
+
+        station.Unsubscribe(subId2);
+        station.Unsubscribe(subId4);
+        station.Dispose();
+    }
+
+    [Fact]
+    public void Station_DeleteTrack_Removes_File_And_Updates_Playlist()
+    {
+        CreateDummyTrack("track1.mp3");
+        CreateDummyTrack("track2.mp3");
+        var station = new RadioStation("test_del", "Del Station", _tempDir);
+
+        Assert.Equal(2, station.TrackCount);
+
+        bool deleted = station.DeleteTrack("track2.mp3");
+        Assert.True(deleted);
+        Assert.Equal(1, station.TrackCount);
+        Assert.False(File.Exists(Path.Combine(_tempDir, "track2.mp3")));
+        Assert.Contains("track1.mp3", station.GetTracks());
+
+        // Попытка удалить несуществующий трек
+        bool deletedNonexistent = station.DeleteTrack("nonexistent.mp3");
+        Assert.False(deletedNonexistent);
+
+        station.Dispose();
+    }
+
+    [Fact]
+    public async Task IcyMetadataWriter_Injects_Metadata_At_Specified_Interval()
+    {
+        using var ms = new MemoryStream();
+        string currentTitle = "Rock Artist - Super Song";
+        var writer = new IcyMetadataWriter(ms, metaInterval: 100, () => currentTitle);
+
+        // Пишем 150 байт аудио
+        byte[] audio = new byte[150];
+        Array.Fill(audio, (byte)0xAA);
+
+        await writer.WriteAudioAsync(audio);
+
+        var result = ms.ToArray();
+        // Первые 100 байт - аудио
+        for (int i = 0; i < 100; i++)
+        {
+            Assert.Equal((byte)0xAA, result[i]);
+        }
+
+        // Байт 100 - длина метаданных N
+        byte lenByte = result[100];
+        Assert.True(lenByte > 0);
+        int metaLength = lenByte * 16;
+
+        // Метаданные содержат StreamTitle
+        string metaStr = System.Text.Encoding.UTF8.GetString(result, 101, metaLength);
+        Assert.Contains("StreamTitle='Rock Artist - Super Song';", metaStr);
+
+        // После метаданных идут оставшиеся 50 байт аудио
+        int audio2Start = 101 + metaLength;
+        Assert.Equal(150 + 1 + metaLength, result.Length);
+        for (int i = audio2Start; i < result.Length; i++)
+        {
+            Assert.Equal((byte)0xAA, result[i]);
+        }
+    }
 }

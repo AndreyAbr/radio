@@ -1,0 +1,14 @@
+services:
+  radio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: radioserver:latest
+    container_name: radio_server
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./wwwroot/audio:/app/wwwroot/audio
+    environment:
+      - ASPNETCORE_URLS=http://+:5000

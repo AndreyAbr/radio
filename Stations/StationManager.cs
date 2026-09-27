@@ -21,7 +21,8 @@ public record StationDetailDto(
     int TrackDurationSeconds = 0,
     int TrackRemainingSeconds = 0,
     bool IsPaused = false,
-    bool IsLiveDj = false
+    bool IsLiveDj = false,
+    int? MaxListeners = null
 );
 
 public record AdminStatsDto(
@@ -209,7 +210,8 @@ public class StationManager
             s.TrackDurationSeconds,
             s.TrackRemainingSeconds,
             s.IsPaused,
-            s.IsLiveDj
+            s.IsLiveDj,
+            s.MaxListeners
         )).ToList();
 
         var memMb = Math.Round((double)Process.GetCurrentProcess().WorkingSet64 / (1024 * 1024), 2);

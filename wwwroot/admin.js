@@ -114,7 +114,9 @@ function renderAdminStations(stations) {
                         ${statusBadge}
                     </div>
                 </div>
-                <span class="station-admin-listeners">👥 ${st.listeners} онл.</span>
+                <span class="station-admin-listeners" onclick="openListenersModal('${st.id}', ${st.maxListeners ?? 0})" style="cursor: pointer;" title="${st.maxListeners ? 'Лимит: ' + st.maxListeners + '. Нажмите для настройки' : 'Без лимита. Нажмите для настройки'}">
+                    👥 ${st.listeners}${st.maxListeners ? ' / ' + st.maxListeners : ''} онл.
+                </span>
             </div>
 
             <div class="station-admin-body">
@@ -145,6 +147,8 @@ function renderAdminStations(stations) {
                 <button class="btn-action" onclick="seekStationRelative('${st.id}', -15)" title="Перемотать на 15 секунд назад">⏪ -15 с</button>
                 <button class="btn-action" onclick="seekStationRelative('${st.id}', 15)" title="Перемотать на 15 секунд вперед">⏩ +15 с</button>
                 <button class="btn-action" onclick="skipTrack('${st.id}')" title="Переключить на следующий трек">⏭️ След.</button>
+                <button class="btn-action" onclick="openTracksModal('${st.id}')" title="Просмотр и удаление треков">📑 Треки (${st.trackCount})</button>
+                <button class="btn-action" onclick="openListenersModal('${st.id}', ${st.maxListeners ?? 0})" title="Настройка лимита слушателей (503)">👥 Лимит</button>
                 <button class="btn-action" onclick="reloadPlaylist('${st.id}')" title="Пересканировать папку на диске">🔄 Обновить</button>
                 <button class="btn-action" onclick="triggerUpload('${st.id}')" title="Загрузить MP3/OGG файлы">📤 Загрузить MP3</button>
                 <a href="/stream/${st.id}" target="_blank" class="btn-action" title="Открыть прямой поток в новой вкладке">🎧 Поток</a>
@@ -378,6 +382,141 @@ async function handleCreateStation(e) {
         fetchAdminData();
     } catch (err) {
         alert(err.message);
+    }
+}
+
+// ============================================================================
+// Управление треками станции (Просмотр и Удаление треков)
+// ============================================================================
+
+let activeStationForTracks = null;
+let activeStationForLimit = null;
+
+async function openTracksModal(stationId) {
+    activeStationForTracks = stationId;
+    const st = currentStationsList.find(s => s.id === stationId);
+    const stationName = st ? st.name : stationId;
+    
+    document.getElementById('tracksModalStationTitle').textContent = `${stationName} (${stationId})`;
+    document.getElementById('tracksModal').style.display = 'flex';
+    await renderTracksModalList(stationId);
+}
+
+function closeTracksModal() {
+    document.getElementById('tracksModal').style.display = 'none';
+    activeStationForTracks = null;
+}
+
+function triggerUploadFromModal() {
+    if (activeStationForTracks) {
+        triggerUpload(activeStationForTracks);
+    }
+}
+
+async function renderTracksModalList(stationId) {
+    const container = document.getElementById('tracksListContainer');
+    const countEl = document.getElementById('tracksModalCount');
+    if (!container) return;
+
+    container.innerHTML = '<div style="color: var(--text-secondary); padding: 12px; text-align: center;">Загрузка треков...</div>';
+
+    try {
+        const res = await fetch(`/api/admin/stations/${stationId}/tracks`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        const tracks = data.tracks || [];
+        const currentTrack = data.currentTrack || '';
+        if (countEl) countEl.textContent = `${tracks.length} треков в плейлисте`;
+
+        if (tracks.length === 0) {
+            container.innerHTML = '<div style="color: var(--text-secondary); padding: 16px; text-align: center;">В плейлисте нет треков. Загрузите файлы .mp3 или .ogg.</div>';
+            return;
+        }
+
+        container.innerHTML = tracks.map(track => {
+            const isPlaying = track === currentTrack;
+            const safeTrackName = track.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            return `
+                <div class="track-item-row ${isPlaying ? 'active' : ''}">
+                    <div class="track-info-col">
+                        <span>🎵</span>
+                        <span class="track-title-text" title="${safeTrackName}">${safeTrackName}</span>
+                        ${isPlaying ? '<span class="track-playing-badge">В эфире</span>' : ''}
+                    </div>
+                    <button class="btn-delete-track" onclick="handleDeleteTrack('${stationId}', '${encodeURIComponent(track)}')">
+                        🗑️ Удалить
+                    </button>
+                </div>
+            `;
+        }).join('');
+    } catch (err) {
+        container.innerHTML = `<div style="color: #ef4444; padding: 12px; text-align: center;">Ошибка загрузки списка треков: ${err.message}</div>`;
+    }
+}
+
+async function handleDeleteTrack(stationId, encodedFileName) {
+    const fileName = decodeURIComponent(encodedFileName);
+    if (!confirm(`Удалить трек "${fileName}" с сервера?`)) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/admin/stations/${stationId}/tracks/${encodeURIComponent(fileName)}`, {
+            method: 'DELETE'
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.message || 'Ошибка удаления трека');
+
+        await renderTracksModalList(stationId);
+        fetchAdminData();
+    } catch (err) {
+        alert('Ошибка при удалении трека: ' + err.message);
+    }
+}
+
+// ============================================================================
+// Настройка ограничения слушателей (503 Service Unavailable)
+// ============================================================================
+
+function openListenersModal(stationId, currentLimit) {
+    activeStationForLimit = stationId;
+    const st = currentStationsList.find(s => s.id === stationId);
+    const stationName = st ? st.name : stationId;
+
+    document.getElementById('listenersModalStationTitle').textContent = `${stationName} (${stationId})`;
+    const input = document.getElementById('maxListenersInput');
+    input.value = currentLimit > 0 ? currentLimit : '';
+    document.getElementById('listenersModal').style.display = 'flex';
+    input.focus();
+}
+
+function closeListenersModal() {
+    document.getElementById('listenersModal').style.display = 'none';
+    activeStationForLimit = null;
+}
+
+async function handleSetMaxListeners(e) {
+    e.preventDefault();
+    if (!activeStationForLimit) return;
+
+    const input = document.getElementById('maxListenersInput');
+    const val = parseInt(input.value.trim(), 10);
+    const maxListeners = (val > 0) ? val : null;
+
+    try {
+        const res = await fetch(`/api/admin/stations/${activeStationForLimit}/max-listeners`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ maxListeners: maxListeners })
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.message || 'Ошибка обновления лимита');
+
+        closeListenersModal();
+        fetchAdminData();
+    } catch (err) {
+        alert('Ошибка установки лимита слушателей: ' + err.message);
     }
 }
 
