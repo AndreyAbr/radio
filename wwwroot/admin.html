@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Радио</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="admin.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="js/lame.min.js"></script>
+</head>
+<body>
+    <div class="background-glow"></div>
+
+    <div class="admin-wrapper">
+        <!-- Шапка панели управления -->
+        <header class="admin-header">
+            <div class="admin-brand">
+                <span class="admin-icon">🎛️</span>
+                <h1>Радио</h1>
+            </div>
+            <div class="header-actions">
+                <a href="/" class="btn-secondary">📻 Открыть веб-плеер</a>
+                <button class="btn-primary" onclick="openNewStationModal()">➕ Новая станция</button>
+            </div>
+        </header>
+
+        <!-- Системные метрики (Telemetry Cards) -->
+        <section class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-header">
+                    <span class="metric-label">Время работы</span>
+                    <span class="metric-icon">⏱️</span>
+                </div>
+                <div class="metric-value" id="valUptime">00:00:00</div>
+                <div class="metric-hint">С момента запуска процесса</div>
+            </div>
+
+            <div class="metric-card highlight">
+                <div class="metric-header">
+                    <span class="metric-label">Слушателей онлайн</span>
+                    <span class="metric-icon">👥</span>
+                </div>
+                <div class="metric-value accent" id="valListeners">0</div>
+                <div class="metric-hint">Суммарно по всем станциям</div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-header">
+                    <span class="metric-label">Трафик вещания</span>
+                    <span class="metric-icon">📡</span>
+                </div>
+                <div class="metric-value" id="valTraffic">0 KB</div>
+                <div class="metric-hint">Отправлено чанками клиентам</div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-header">
+                    <span class="metric-label">Память процесса (RAM)</span>
+                    <span class="metric-icon">💾</span>
+                </div>
+                <div class="metric-value" id="valMemory">0 MB</div>
+                <div class="metric-hint">WorkingSet (.NET Runtime)</div>
+            </div>
+        </section>
+
+        <!-- Студийный микшер прямого эфира (Live Studio & DJ Voiceover) -->
+        <section class="admin-section mixer-section">
+            <div class="section-title-row">
+                <h2>🎛️ Студийный микшер прямого эфира (Live Studio DJ)</h2>
+                <span class="live-dot-tag" id="mixerStatusTag">Микрофон отключен</span>
+            </div>
+
+            <div class="mixer-console">
+                <div class="mixer-top-bar">
+                    <div class="mixer-station-control">
+                        <label for="mixerStationSelect" class="mixer-label">Станция вещания:</label>
+                        <select id="mixerStationSelect" class="mixer-select" onchange="onMixerStationChange()">
+                            <option value="all" selected>📡 Все станции (Общий эфир)</option>
+                            <option value="rock">Рок-Волна (rock)</option>
+                            <option value="pop">Поп-Хит (pop)</option>
+                            <option value="synthwave">Синтвейв (synthwave)</option>
+                            <option value="jazz">Джаз-Кафе (jazz)</option>
+                        </select>
+                    </div>
+
+                    <div class="mixer-broadcast-action">
+                        <button id="btnTestMic" class="btn-secondary" onclick="testMicrophone()" title="Проверить работу микрофона без выхода в эфир">
+                            🎧 Проверить микрофон
+                        </button>
+                        <button id="btnOnAir" class="btn-on-air" onclick="toggleLiveDj()" title="Нажмите, чтобы включить микрофон и говорить поверх музыки">
+                            <span class="on-air-lamp"></span>
+                            <span id="onAirText">🎙️ ВЫЙТИ В ЭФИР (ON AIR)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Подсказка / Статус доступа к микрофону -->
+                <div id="micHelpBanner" class="mic-help-banner">
+                    <div class="mic-help-icon" id="micHelpIcon">💡</div>
+                    <div class="mic-help-text" id="micHelpText">
+                        <strong>Как говорить в эфир:</strong> Нажмите кнопку <strong>«🎙️ ВЫЙТИ В ЭФИР»</strong> или <strong>«🎧 Проверить микрофон»</strong>. Браузер запросит разрешение на использование микрофона — нажмите <strong>«Разрешить»</strong> (Allow).
+                        <span id="micAddressHint" style="display: block; margin-top: 4px; font-size: 11px; opacity: 0.85;">
+                            Если всплывающее окно не появилось: нажмите на значок 🔒 или ⚙️ в левой части адресной строки браузера (перед URL) и переведите переключатель «Микрофон» в положение «Разрешить».
+                        </span>
+                    </div>
+                    <button type="button" id="btnRequestMicPerm" class="btn-mic-perm" onclick="handleRequestMicPermission()" title="Запросить диалог разрешения микрофона у браузера">🎤 Запросить микрофон</button>
+                </div>
+
+                <div class="mixer-channels-grid">
+                    <!-- Канал: Фоновая музыка -->
+                    <div class="mixer-channel-card">
+                        <div class="channel-title">
+                            <span>🎵 Фоновая музыка</span>
+                            <span id="musicVolDisplay" class="vol-badge">80%</span>
+                        </div>
+                        <div class="slider-container">
+                            <input type="range" id="musicFader" min="0" max="100" value="80" class="studio-slider" oninput="onMusicFaderChange(this.value)">
+                        </div>
+                        <div class="channel-controls">
+                            <button id="btnMuteMusic" class="btn-channel-toggle" onclick="toggleMuteMusic()">Mute</button>
+                            <button id="btnPauseMusic" class="btn-channel-toggle" onclick="toggleMixerStationPause()">⏸ Пауза</button>
+                        </div>
+                        <div class="meter-bar-container">
+                            <div class="meter-bar-fill" id="musicMeterFill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Канал: Микрофон ведущего -->
+                    <div class="mixer-channel-card highlight-channel">
+                        <div class="channel-title">
+                            <span>🎤 Микрофон ведущего</span>
+                            <span id="micVolDisplay" class="vol-badge accent">100%</span>
+                        </div>
+                        <div class="slider-container">
+                            <input type="range" id="micFader" min="0" max="150" value="100" class="studio-slider mic-slider" oninput="onMicFaderChange(this.value)">
+                        </div>
+                        <div class="channel-controls">
+                            <button id="btnMuteMic" class="btn-channel-toggle" onclick="toggleMuteMic()">Mute</button>
+                            <span class="mic-status-label" id="micStatusLabel">Микрофон не подключен</span>
+                        </div>
+                        <div class="meter-bar-container mic-meter-container">
+                            <div class="meter-bar-fill mic-fill" id="micMeterFill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Канал: Мастер-выход и Auto-Ducking -->
+                    <div class="mixer-channel-card master-channel">
+                        <div class="channel-title">
+                            <span>🔊 Мастер-выход & Даккинг</span>
+                            <span class="vol-badge">MIX</span>
+                        </div>
+                        <div class="ducking-box">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="duckingEnabled" checked onchange="onDuckingToggle(this.checked)">
+                                <span>Auto-Ducking (приглушать музыку при речи)</span>
+                            </label>
+                            <div class="ducking-subcontrol">
+                                <span>Уровень музыки при речи: <strong id="duckingDepthLabel">25%</strong></span>
+                                <input type="range" id="duckingDepth" min="5" max="50" value="25" class="studio-slider small-slider" oninput="onDuckingDepthChange(this.value)">
+                            </div>
+                        </div>
+                        <div class="quick-seek-group">
+                            <span>Перемотка эфира:</span>
+                            <div class="seek-btn-row">
+                                <button class="btn-seek-fast" onclick="seekMixerStationRelative(-15)" title="Перемотать на 15 секунд назад">⏪ -15 с</button>
+                                <button class="btn-seek-fast" onclick="seekMixerStationRelative(15)" title="Перемотать на 15 секунд вперед">⏩ +15 с</button>
+                            </div>
+                        </div>
+                        <div class="meter-bar-container master-meter-container">
+                            <div class="meter-bar-fill master-fill" id="masterMeterFill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Секция управления станциями -->
+        <section class="admin-section">
+            <div class="section-title-row">
+                <h2>Радиостанции в эфире (<span id="stationsCount">0</span>)</h2>
+                <button class="btn-icon" onclick="fetchAdminData()" title="Обновить сейчас">🔄</button>
+            </div>
+            
+            <div class="admin-stations-grid" id="adminStationsGrid">
+                <!-- Карточки станций формируются через admin.js -->
+            </div>
+        </section>
+
+        <!-- Секция журнала активности -->
+        <section class="admin-section">
+            <div class="section-title-row">
+                <h2>Журнал активности эфира (Live Activity Log)</h2>
+                <span class="live-dot-tag">● Живой лог</span>
+            </div>
+            <div class="log-container">
+                <table class="log-table">
+                    <thead>
+                        <tr>
+                            <th>Время (UTC)</th>
+                            <th>IP / Источник</th>
+                            <th>Станция</th>
+                            <th>Событие</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logTableBody">
+                        <tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">Ожидание событий...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Модальное окно добавления станции -->
+        <div class="modal-overlay" id="stationModal" style="display: none;">
+            <div class="modal-box">
+                <div class="modal-header">
+                    <h3>Создать новую станцию</h3>
+                    <button class="btn-close" onclick="closeNewStationModal()">✕</button>
+                </div>
+                <form id="newStationForm" onsubmit="handleCreateStation(event)">
+                    <div class="form-group">
+                        <label for="stationId">Идентификатор станции (ID):</label>
+                        <input type="text" id="stationId" placeholder="например, synthwave" required pattern="[a-zA-Z0-9_\-]+" title="Только латинские буквы, цифры и дефис">
+                        <small>Будет использоваться в URL потока: /stream/{id}</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="stationName">Название станции:</label>
+                        <input type="text" id="stationName" placeholder="например, Synthwave & Cyber" required>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn-secondary" onclick="closeNewStationModal()">Отмена</button>
+                        <button type="submit" class="btn-primary">Создать станцию</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Скрытый инпут для загрузки файлов в станцию -->
+    <input type="file" id="fileUploadInput" multiple accept=".mp3,.ogg" style="display: none;">
+
+    <script src="admin.js"></script>
+</body>
+</html>

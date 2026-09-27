@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Радио</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="background-glow"></div>
+
+    <div class="app-container">
+        <!-- Шапка -->
+        <header class="app-header">
+            <div class="logo">
+                <span class="logo-icon">📻</span>
+                <h1>Радио</h1>
+            </div>
+            <div class="header-actions-group">
+                <a href="/admin" class="btn-header-admin">🎛️ Панель сервера</a>
+                <div class="server-status" id="serverStatusBadge">
+                    <span class="status-dot"></span>
+                    <span id="serverStatusText">Сервер активен</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Основной блок плеера -->
+        <main class="player-main">
+            <!-- Карточка текущего вещания -->
+            <section class="now-playing-card">
+                <div class="visualizer" id="visualizer">
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                </div>
+
+                <div class="stream-info">
+                    <span class="live-pill" id="liveBadge">
+                        <span class="live-dot"></span> LIVE
+                    </span>
+                    <h2 class="current-station" id="currentStationName">Выберите радиостанцию</h2>
+                    <p class="current-track" id="currentTrackTitle">—</p>
+
+                    <!-- Таймер и прогресс трека -->
+                    <div class="track-progress-container" id="trackProgressContainer">
+                        <div class="track-time-row">
+                            <span class="track-time-elapsed" id="trackTimeElapsed">00:00</span>
+                            <span class="track-time-remaining" id="trackTimeRemaining">⏳ осталось: 00:00</span>
+                        </div>
+                        <div class="track-progress-bar">
+                            <div class="track-progress-fill" id="trackProgressFill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <div class="listeners-badge" id="listenersBadge">
+                        👥 <span id="currentStationListeners">0</span> слушателей
+                    </div>
+                </div>
+
+                <!-- Аудио элемент HTML5 -->
+                <audio id="audioPlayer" preload="none"></audio>
+
+                <!-- Панель управления -->
+                <div class="player-controls">
+                    <button class="btn-play-pause" id="btnPlayPause" title="Воспроизведение / Пауза">
+                        <span id="playIcon">▶</span>
+                    </button>
+                    
+                    <div class="volume-container">
+                        <button class="btn-mute" id="btnMute" title="Выключить звук">🔊</button>
+                        <input type="range" id="volumeSlider" min="0" max="1" step="0.05" value="0.8" class="volume-slider">
+                        <span class="volume-value" id="volumeValue">80%</span>
+                    </div>
+                </div>
+
+                <div class="stream-state" id="streamState">Нажмите кнопку воспроизведения для старта</div>
+
+                <div class="dj-live-hint" id="djLiveHint">
+                    <span>🎙️ Хотите говорить в эфир поверх музыки?</span>
+                    <a href="/admin" class="dj-hint-link">Открыть студийный DJ-микшер →</a>
+                </div>
+            </section>
+
+            <!-- Список радиостанций -->
+            <section class="stations-section">
+                <div class="section-header">
+                    <h3>Доступные станции</h3>
+                    <span class="auto-refresh-note">🔄 Прямой эфир</span>
+                </div>
+                <div class="stations-grid" id="stationsList">
+                    <!-- Заполняется динамически из player.js -->
+                </div>
+            </section>
+        </main>
+
+        <!-- Подвал -->
+        <footer class="app-footer">
+            <span class="footer-brand">Радио</span>
+        </footer>
+    </div>
+
+    <script src="player.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>RadioServer</RootNamespace>
+    <DefaultItemExcludes>$(DefaultItemExcludes);RadioServer.Tests\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="RadioServer.Tests\**" />
+    <Content Remove="RadioServer.Tests\**" />
+    <EmbeddedResource Remove="RadioServer.Tests\**" />
+    <None Remove="RadioServer.Tests\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NLayer" Version="3.0.0" />
+  </ItemGroup>
+
+</Project>
